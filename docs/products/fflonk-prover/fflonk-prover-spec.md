@@ -1,11 +1,11 @@
 ---
 product: fflonk-prover
-version: 0.1.0
+version: 0.1.1
 status: Draft
 type: product
 interfaces: [cli, library]
 created: 2026-04-16
-updated: 2026-04-16
+updated: 2026-04-17
 ---
 
 ## Overview
@@ -79,7 +79,7 @@ No web interface, no API, no mobile. This is developer/operator infrastructure.
 
 ### F5 — Library API
 
-**F5.1** The Rust crate exposes a `prove(zkey: &[u8], witness: &[u8]) -> Result<(Proof, PublicSignals), ProverError>` function (or equivalent typed API).
+**F5.1** The Rust crate exposes a `prove(zkey_path: &Path, witness_path: &Path) -> Result<(Proof, PublicSignals), ProverError>` function (or equivalent typed API). Paths (not byte slices) are used because the FFLONK zkey's section table requires random access; the prover mmaps or seeks the file rather than forcing callers to load a multi-GB artifact into memory.
 
 **F5.2** The library is `no_std`-compatible where feasible, but `std` is the primary target. Async is not required — proving is CPU-bound synchronous work.
 
@@ -95,7 +95,7 @@ No web interface, no API, no mobile. This is developer/operator infrastructure.
 
 ### F7 — Licensing and dependencies
 
-**F7.1** The prover is licensed MIT. All dependencies must be MIT or Apache-2.0 (or dual MIT/Apache-2.0). No GPL, LGPL, MPL, or other copyleft dependencies.
+**F7.1** The prover is licensed MIT. All dependencies must be under permissive OSI-approved licenses — MIT, Apache-2.0, BSD (2-Clause or 3-Clause), ISC, Unicode-3.0, Zlib, CC0-1.0, or Apache-2.0 WITH LLVM-exception. **No copyleft dependencies** (GPL, LGPL, AGPL, MPL, EPL, CDDL, or similar). Dual-licensed dependencies are acceptable if at least one option satisfies the permissive allowlist. The exact allowlist is codified in `deny.toml`.
 
 **F7.2** Dependencies are pinned via `Cargo.lock` (committed to repo) for reproducible builds.
 
@@ -143,7 +143,7 @@ No web interface, no API, no mobile. This is developer/operator infrastructure.
 
 ### F7 — Licensing
 
-- [ ] `cargo deny check licenses` passes with only MIT and Apache-2.0 licenses.
+- [ ] `cargo deny check licenses` passes under the permissive allowlist defined in `deny.toml`. No copyleft licenses (GPL/LGPL/AGPL/MPL/EPL/CDDL/etc.) appear in the transitive dependency graph.
 - [ ] `Cargo.lock` is committed.
 
 ## Constraints & Dependencies
@@ -162,7 +162,6 @@ No web interface, no API, no mobile. This is developer/operator infrastructure.
 
 | Crate/project | Purpose | License |
 |---|---|---|
-| `taceo-circom-types` | Read `.zkey` and `.wtns` binary formats | MIT/Apache-2.0 |
 | `ark-bn254` / `ark-ff` / `ark-ec` | BN254 field and curve arithmetic | MIT/Apache-2.0 |
 | `ark-poly` | Polynomial operations (FFT/NTT, evaluation) | MIT/Apache-2.0 |
 | `rayon` | Parallel iterators for multi-core MSM/FFT | MIT/Apache-2.0 |
