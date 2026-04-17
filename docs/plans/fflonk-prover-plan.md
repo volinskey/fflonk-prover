@@ -169,6 +169,12 @@ Incremental validation is still possible:
 
 ### Phase 5: Integration tests
 
+**This phase is the authoritative correctness gate for Phase 3.** Because snarkjs's
+random blinding prevents byte-matching our commitments against any committed
+reference proof, "our prover is correct" is ultimately "`snarkjs fflonk verify`
+accepts our proof" and/or "the Solidity verifier accepts it on-chain." Expect
+most Phase 3 bugs to surface here, not in Phase 3's own unit tests.
+
 - [ ] Integration test: our prover on multiplier → `snarkjs fflonk verify` PASS [code]
 - [ ] Integration test: our prover on poseidon → `snarkjs fflonk verify` PASS [code]
 - [ ] Integration test: deploy committed multiplier Solidity verifier to Anvil, submit our proof, expect tx success [code]
