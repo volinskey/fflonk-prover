@@ -98,25 +98,66 @@
 
 ### Phase 3: FFLONK proving — correctness
 
+**Important context for anyone resuming Phase 3.** snarkjs applies random blinding
+scalars to the witness polynomials A, B, C inside Round 1 for zero-knowledge. This
+means the `C1`, `C2`, `W1`, `W2` commitments and the `a`, `b`, `c`, `z`, `zw`,
+`t1w`, `t2w`, `inv` evaluations in `tests/fixtures/*/reference_proof.json` are
+**specific to the snarkjs run that produced them and cannot be reproduced
+deterministically** by any independent prover. Do NOT write round-level tests
+that assert byte equality against those values.
+
+Incremental validation is still possible:
+1. **Preprocessed-poly evaluations** (`ql`, `qr`, `qm`, `qo`, `qc`, `s1`, `s2`,
+   `s3` in the reference proof) are blinder-independent. Evaluating the zkey's
+   Q_L..Q_C, σ_1..σ_3 coefficient sections at the derived challenge `xi` must
+   match the reference proof exactly. Use this as Phase 3's first ground-truth
+   test (task below).
+2. **End-to-end** via Phase 5's `snarkjs fflonk verify` check on our produced
+   proof — the authoritative correctness signal for everything blinding touches.
+3. **Structural checks** per round (degrees, vanishing at specific points,
+   pairing identities that don't involve blinded values).
+
 - [x] Implement Fiat-Shamir transcript matching snarkjs 0.7.6 exactly [code]
-- [ ] Implement KZG polynomial commitment over BN254 [code]
-  - Write failing test: commit to a known polynomial → result matches snarkjs commitment on same inputs
-- [ ] Implement prover Round 1: commit witness polynomials A, B, C [code]
-  - Write failing test: on multiplier, A/B/C commitments match reference proof's commitments
-- [ ] Implement prover Round 2: compute + commit permutation polynomial Z [code]
-  - Write failing test: Z commitment matches reference on multiplier
-- [ ] Implement prover Round 3: compute + commit quotient polynomial T [code]
-  - Write failing test: T commitment matches reference on multiplier
-- [ ] Implement prover Round 4: evaluate polynomials at challenge zeta [code]
-  - Write failing test: evaluations match reference on multiplier
-- [ ] Implement prover Round 5: combine openings via FFLONK polynomial merging; emit W and W' [code]
-  - Write failing test: final W, W' commitments match reference on multiplier
+- [x] Implement KZG polynomial commitment over BN254 [code]
+- [ ] Implement preprocessed-polynomial evaluation at the xi challenge (blinder-independent ground-truth test) [code]
+  - Derive xi via transcript chain: beta → gamma → xiSeed → xi = xiSeed^24 (use our transcript; inputs: C0 from vkey, A[0]=public inputs, C1, C2 — take C1/C2 from the reference proof since we can't produce matching ones ourselves yet)
+  - Read Q_L, Q_R, Q_M, Q_O, Q_C, σ_1, σ_2, σ_3 coefficient vectors via `read_fr_section`
+  - Horner-evaluate each at xi
+  - Assert each equals the corresponding `ql`, `qr`, `qm`, `qo`, `qc`, `s1`, `s2`, `s3` decimal in `reference_proof.json` for both multiplier and poseidon
+- [ ] Implement prover Round 1: build A/B/C from witness + maps, compute T0 quotient, merge (fan-in-4) → C1 [code]
+  - Subtasks:
+    - Read A_map/B_map/C_map (use existing `read_u32_section`); construct A/B/C buffers of length `domain_size` by setting `A[i] = witness[A_map[i]]` etc.
+    - Apply blinding scalars at high coefficient indices (snarkjs uses 9 blinders total — see snarkjs `fflonk_prove.js`). For deterministic testing, optionally expose a zero-blinding mode.
+    - iFFT A/B/C from evaluation-on-domain form to coefficient form via `ark_poly::Radix2EvaluationDomain`.
+    - Compute T0 = (q_L·A + q_R·B + q_M·A·B + q_O·C + q_C + PI(X)) / Z_H(X) in extended evaluation domain (oversample by 4×), iFFT back. Z_H(X) = X^domain_size − 1. PI(X) is the public-input Lagrange interpolation.
+    - Merge A/B/C/T0 via snarkjs's `CPolynomial(4)`: **interleave coefficients** — if each input has coeffs `[c_0, c_1, ...]`, the merged poly has coeffs `[A_0, B_0, C_0, T0_0, A_1, B_1, C_1, T0_1, ...]`.
+    - KZG commit merged poly → `proof.C1`.
+  - Round 1 output: `C1` G1 point. Absorb into transcript (chained in subsequent challenges).
+  - **Test strategy:** structural only (degree < 4·domain_size). Correctness is via end-to-end verify.
+- [ ] Implement prover Round 2: permutation polynomial Z + quotient decomposition T0/T1/T2 → C2 merge [code]
+  - Uses beta, gamma challenges. Z(X) encodes the grand-product permutation check over σ_1, σ_2, σ_3.
+  - Decompose T = T0 + X^domain·T1 + X^(2·domain)·T2 (each Ti of degree < domain_size).
+  - Fan-in-4 merge Z, T0, T1, T2 into C2 (per `CPolynomial(4)`; see snarkjs round3 code).
+  - KZG commit → `proof.C2`. Absorb into transcript.
+  - Test: structural (degree, non-zero commitment).
+- [ ] Implement prover Round 4: evaluate polynomials at xi [code]
+  - Compute the 16 proof evaluations: `ql, qr, qm, qo, qc, s1, s2, s3, a, b, c, z, zw, t1w, t2w, inv`.
+  - `ql..s3`: covered by the preprocessed-eval test above.
+  - `a, b, c, z, zw, t1w, t2w, inv`: blinding-dependent. Test via end-to-end verify.
+- [ ] Implement prover Round 5: FFLONK fan-in merging + KZG opening proofs W1, W2 [code]
+  - W1: opens the round-1/round-2 merged polynomial at `xi` (fan-in-3 merge of sub-openings).
+  - W2: opens at `xi·ω` (the shifted evaluation for the permutation argument).
+  - KZG opening = `(P(X) − P(z)) / (X − z)`, committed.
+  - Test: structural; end-to-end via verify.
 - [ ] Serialize proof struct + public signals to snarkjs-compatible JSON [code]
-  - Write failing test: produced `proof.json` equals reference `proof.json` byte-for-byte on multiplier (after normalizing key order if needed)
-  - Write failing test: produced `public.json` equals reference `public.json` byte-for-byte
-- [ ] End-to-end correctness: run prover on poseidon, output equals reference byte-for-byte [code]
+  - Output format per `reference_proof.json`: `{ polynomials: { C1, C2, W1, W2 }, evaluations: { ql, qr, qm, qo, qc, s1, s2, s3, a, b, c, z, zw, t1w, t2w, inv }, protocol: "fflonk", curve: "bn128" }`.
+  - G1 points serialize as `[x, y, "1"]` (decimal strings, Jacobian with z=1 meaning affine).
+  - Scalars serialize as decimal strings (not hex, not Montgomery).
+  - `public.json` is a JSON array of decimal strings: `[public_signal_0, public_signal_1, ...]`.
+  - Test: roundtrip — serialize our Proof struct, parse with `serde_json`, compare to original.
 - [ ] Library API: `prove(zkey_path: &Path, witness_path: &Path) -> Result<(Proof, PublicSignals), ProverError>` [code]
-  - Write failing test: library `prove()` returns the same `Proof` as CLI invocation on the same inputs
+  - Wraps all rounds. Returns typed `Proof` + `PublicSignals`.
+  - Test: call on multiplier zkey + wtns, assert returned Proof has expected structure (4 G1 points in polynomials, 16 scalar evaluations, correct protocol/curve markers). Byte-exact values are validated by Phase 5 end-to-end test.
 
 ### Phase 4: Local verifier
 
@@ -223,3 +264,4 @@ _Populated during implementation by `/implement`, AFTER tasks are being executed
 - 2026-04-17: Completed Phase 1 tasks 1-7 — dev-setup.md, ptau download (9.7 GB from S3), multiplier.circom (1 constraint), poseidon.circom (~63k wires via 154 Poseidon(1) iterations via circomlib), regenerate-fixtures.sh, sample input JSONs, tests/fixtures/README.md. Generated committed fixtures for both circuits (multiplier ~130 KB; poseidon ~166 MB, zkey 150 MB). Both reference proofs verified by `snarkjs fflonk verify` — **PROOF VERIFIED SUCCESSFULLY**. Cargo.toml extended with `exclude` patterns to keep published crate tarball small. **Phase 1 complete.**
 - 2026-04-17: Completed Phase 2 via TDD. `src/zkey.rs`: global header + section iterator + full FFLONK section-2 parser + generic `read_fr_section` for preprocessed polynomial sections. Every vkey.json field (k1=2, k2=3, w3/w4/w8/wr, C0, X_2) matches byte-exact against our parser. Cross-circuit sanity verified on poseidon. `src/wtns.rs`: canonical-LE witness parser, multiplier witness decodes to [1, 33, 3, 11]. Defensive tests for truncated/malformed inputs (bad magic, bad version, overflow section size, non-BN254 curve, misaligned Fr section). Discovered key format difference: zkey Fr/Fq is Montgomery-LE (use `Fp::new_unchecked`), wtns Fr is canonical-LE (use `from_le_bytes_mod_order`). 24 tests total, all green. Lint + fmt clean. **Phase 2 complete.**
 - 2026-04-17: **Phase 3 partial — primitives done, rounds deferred.** Two protocol primitives implemented and verified byte-exact vs snarkjs: (1) `src/transcript.rs` — Keccak256 Fiat-Shamir matching snarkjs 0.7.6. Encoding is canonical-BE for Fr/Fq (NOT Montgomery, despite ffjavascript's `toRprBE` naming). Verified via full chain reproduction: `alpha`, `y`, and `xi = xiSeed^24` all match the reference values logged from `snarkjs fflonk prove` on multiplier. (2) `src/kzg.rs` — KZG polynomial commitment as arkworks `VariableBaseMSM`. Verified by reading `C0` coefficients (section 17) + PTau SRS (section 16) from the multiplier zkey, committing, and matching `vkey.json`'s C0 x,y exactly. Added supporting zkey readers: `read_g1_section` (64-byte uncompressed affine entries) and `read_u32_section` (for A_map/B_map/C_map — multiplier has 2 constraint rows per map). Paused before Round 1 — remaining Phase 3 work (rounds 1-5 + proof serialization + library API) is a multi-session effort that can only be validated end-to-end due to random-blinding non-determinism. **32 tests passing, lint + fmt clean.**
+- 2026-04-17: Phase 3 task descriptions revised for fresh-session resumption. Round 1-5 sub-tasks no longer assume byte-match against `reference_proof.json` (impossible due to snarkjs random blinding). Added a new incremental-validation task (preprocessed-polynomial evaluation at xi — the one blinder-independent signal) as the first Round 3 step. Phase 5 header updated to flag it as the authoritative correctness gate.
