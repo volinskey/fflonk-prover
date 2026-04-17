@@ -34,7 +34,9 @@ pub fn commit(coeffs: &[Fr], srs: &[G1Affine]) -> Result<G1Affine, KzgError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::zkey::{read_fflonk_header, read_fr_section, read_g1_section, SECTION_C0, SECTION_PTAU};
+    use crate::zkey::{
+        read_fflonk_header, read_fr_section, read_g1_section, SECTION_C0, SECTION_PTAU,
+    };
     use ark_ff::PrimeField;
 
     const MULT_ZKEY: &str = "tests/fixtures/multiplier/circuit.zkey";
@@ -66,6 +68,9 @@ mod tests {
     fn rejects_srs_shorter_than_poly() {
         let coeffs = vec![Fr::from(1u64); 10];
         let srs: Vec<G1Affine> = vec![];
-        assert!(matches!(commit(&coeffs, &srs), Err(KzgError::SrsTooSmall { .. })));
+        assert!(matches!(
+            commit(&coeffs, &srs),
+            Err(KzgError::SrsTooSmall { .. })
+        ));
     }
 }

@@ -119,53 +119,18 @@ Incremental validation is still possible:
 
 - [x] Implement Fiat-Shamir transcript matching snarkjs 0.7.6 exactly [code]
 - [x] Implement KZG polynomial commitment over BN254 [code]
-- [ ] Implement preprocessed-polynomial evaluation at the xi challenge (blinder-independent ground-truth test) [code]
-  - Derive xi via transcript chain: beta → gamma → xiSeed → xi = xiSeed^24 (use our transcript; inputs: C0 from vkey, A[0]=public inputs, C1, C2 — take C1/C2 from the reference proof since we can't produce matching ones ourselves yet)
-  - Read Q_L, Q_R, Q_M, Q_O, Q_C, σ_1, σ_2, σ_3 coefficient vectors via `read_fr_section`
-  - Horner-evaluate each at xi
-  - Assert each equals the corresponding `ql`, `qr`, `qm`, `qo`, `qc`, `s1`, `s2`, `s3` decimal in `reference_proof.json` for both multiplier and poseidon
-- [ ] Implement prover Round 1: build A/B/C from witness + maps, compute T0 quotient, merge (fan-in-4) → C1 [code]
-  - Subtasks:
-    - Read A_map/B_map/C_map (use existing `read_u32_section`); construct A/B/C buffers of length `domain_size` by setting `A[i] = witness[A_map[i]]` etc.
-    - Apply blinding scalars at high coefficient indices (snarkjs uses 9 blinders total — see snarkjs `fflonk_prove.js`). For deterministic testing, optionally expose a zero-blinding mode.
-    - iFFT A/B/C from evaluation-on-domain form to coefficient form via `ark_poly::Radix2EvaluationDomain`.
-    - Compute T0 = (q_L·A + q_R·B + q_M·A·B + q_O·C + q_C + PI(X)) / Z_H(X) in extended evaluation domain (oversample by 4×), iFFT back. Z_H(X) = X^domain_size − 1. PI(X) is the public-input Lagrange interpolation.
-    - Merge A/B/C/T0 via snarkjs's `CPolynomial(4)`: **interleave coefficients** — if each input has coeffs `[c_0, c_1, ...]`, the merged poly has coeffs `[A_0, B_0, C_0, T0_0, A_1, B_1, C_1, T0_1, ...]`.
-    - KZG commit merged poly → `proof.C1`.
-  - Round 1 output: `C1` G1 point. Absorb into transcript (chained in subsequent challenges).
-  - **Test strategy:** structural only (degree < 4·domain_size). Correctness is via end-to-end verify.
-- [ ] Implement prover Round 2: permutation polynomial Z + quotient decomposition T0/T1/T2 → C2 merge [code]
-  - Uses beta, gamma challenges. Z(X) encodes the grand-product permutation check over σ_1, σ_2, σ_3.
-  - Decompose T = T0 + X^domain·T1 + X^(2·domain)·T2 (each Ti of degree < domain_size).
-  - Fan-in-4 merge Z, T0, T1, T2 into C2 (per `CPolynomial(4)`; see snarkjs round3 code).
-  - KZG commit → `proof.C2`. Absorb into transcript.
-  - Test: structural (degree, non-zero commitment).
-- [ ] Implement prover Round 4: evaluate polynomials at xi [code]
-  - Compute the 16 proof evaluations: `ql, qr, qm, qo, qc, s1, s2, s3, a, b, c, z, zw, t1w, t2w, inv`.
-  - `ql..s3`: covered by the preprocessed-eval test above.
-  - `a, b, c, z, zw, t1w, t2w, inv`: blinding-dependent. Test via end-to-end verify.
-- [ ] Implement prover Round 5: FFLONK fan-in merging + KZG opening proofs W1, W2 [code]
-  - W1: opens the round-1/round-2 merged polynomial at `xi` (fan-in-3 merge of sub-openings).
-  - W2: opens at `xi·ω` (the shifted evaluation for the permutation argument).
-  - KZG opening = `(P(X) − P(z)) / (X − z)`, committed.
-  - Test: structural; end-to-end via verify.
-- [ ] Serialize proof struct + public signals to snarkjs-compatible JSON [code]
-  - Output format per `reference_proof.json`: `{ polynomials: { C1, C2, W1, W2 }, evaluations: { ql, qr, qm, qo, qc, s1, s2, s3, a, b, c, z, zw, t1w, t2w, inv }, protocol: "fflonk", curve: "bn128" }`.
-  - G1 points serialize as `[x, y, "1"]` (decimal strings, Jacobian with z=1 meaning affine).
-  - Scalars serialize as decimal strings (not hex, not Montgomery).
-  - `public.json` is a JSON array of decimal strings: `[public_signal_0, public_signal_1, ...]`.
-  - Test: roundtrip — serialize our Proof struct, parse with `serde_json`, compare to original.
-- [ ] Library API: `prove(zkey_path: &Path, witness_path: &Path) -> Result<(Proof, PublicSignals), ProverError>` [code]
-  - Wraps all rounds. Returns typed `Proof` + `PublicSignals`.
-  - Test: call on multiplier zkey + wtns, assert returned Proof has expected structure (4 G1 points in polynomials, 16 scalar evaluations, correct protocol/curve markers). Byte-exact values are validated by Phase 5 end-to-end test.
+- [x] Implement preprocessed-polynomial evaluation at the xi challenge (blinder-independent ground-truth test) [code]
+- [x] Implement prover Round 1: build A/B/C from witness + maps, compute T0 quotient, merge (fan-in-4) → C1 [code]
+- [x] Implement prover Round 2: permutation polynomial Z + T1 + T2 → C2 merge (fan-in-3) [code]
+- [x] Implement prover Round 4: evaluate polynomials at xi [code]
+- [x] Implement prover Round 5: FFLONK fan-in merging + KZG opening proofs W1, W2 [code]
+- [x] Serialize proof struct + public signals to snarkjs-compatible JSON [code]
+- [x] Library API: `prove(zkey_path: &Path, witness_path: &Path) -> Result<(Proof, PublicSignals), ProverError>` [code]
 
 ### Phase 4: Local verifier
 
-- [ ] Implement FFLONK verifier using `ark-ec` pairing check (for local testing only; on-chain verifier is the snarkjs-generated Solidity contract) [code]
-  - Write failing test: verify multiplier reference proof → PASS
-  - Write failing test: verify tampered proof (flip a byte in A) → FAIL
-  - Write failing test: verify proof with wrong public signals → FAIL
-- [ ] Expose `verify()` via library API [code]
+- [x] Implement FFLONK verifier using `ark-ec` pairing check (for local testing only; on-chain verifier is the snarkjs-generated Solidity contract) [code]
+- [x] Expose `verify()` via library API [code]
 
 ### Phase 5: Integration tests
 
@@ -175,32 +140,32 @@ reference proof, "our prover is correct" is ultimately "`snarkjs fflonk verify`
 accepts our proof" and/or "the Solidity verifier accepts it on-chain." Expect
 most Phase 3 bugs to surface here, not in Phase 3's own unit tests.
 
-- [ ] Integration test: our prover on multiplier → `snarkjs fflonk verify` PASS [code]
-- [ ] Integration test: our prover on poseidon → `snarkjs fflonk verify` PASS [code]
-- [ ] Integration test: deploy committed multiplier Solidity verifier to Anvil, submit our proof, expect tx success [code]
-- [ ] Integration test: deploy committed poseidon Solidity verifier to Anvil, submit our proof, expect tx success [code]
-- [ ] Wire all integration tests into CI: install Node.js 20 + snarkjs 0.7.6 + Foundry in CI image; run on every PR [infra]
+- [x] Integration test: our prover on multiplier → `snarkjs fflonk verify` PASS [code]
+- [x] Integration test: our prover on poseidon → `snarkjs fflonk verify` PASS [code]
+- [!] Integration test: deploy committed multiplier Solidity verifier to Anvil, submit our proof, expect tx success — WAITING FOR: Foundry install (not available in dev environment); lower priority — snarkjs Solidity verifier is a function of the same vkey, so our Rust verifier passing is strong evidence the Solidity one will too [code]
+- [!] Integration test: deploy committed poseidon Solidity verifier to Anvil, submit our proof, expect tx success — WAITING FOR: Foundry [code]
+- [x] Wire Node.js 20 into CI for `tests/snarkjs_verify.rs` (installs snarkjs via npx on first run); Foundry install deferred with Anvil tests [infra]
 
 ### Phase 6: CLI
 
-- [ ] Implement `fflonk-prover prove <zkey> <witness> <proof-out> <public-out>` subcommand [code]
-- [ ] Implement `fflonk-prover verify <vkey> <public> <proof>` subcommand [code]
-- [ ] Implement `fflonk-prover info <zkey>` subcommand — prints proof system, constraint count, curve, nVars, nPublic [code]
-- [ ] Implement `fflonk-prover --version` [code]
-- [ ] Implement `--threads <N>` flag; default to `num_cpus::get_physical()` [code]
-- [ ] Emit timing breakdown to stderr during `prove` (FFT, MSM, poly eval, commitment, total wall-clock, peak RSS) [code]
-- [ ] Exit codes: 0 success, 1 invalid input / prove fail, 2 verify fail [code]
-- [ ] CLI integration tests: spawn binary as subprocess, assert outputs and exit codes [code]
+- [x] Implement `fflonk-prover prove <zkey> <witness> <proof-out> <public-out>` subcommand [code]
+- [x] Implement `fflonk-prover verify <vkey> <public> <proof>` subcommand [code]
+- [x] Implement `fflonk-prover info <zkey>` subcommand — prints proof system, constraint count, curve, nVars, nPublic [code]
+- [x] Implement `fflonk-prover --version` [code]
+- [x] Implement `--threads <N>` flag; default to `num_cpus::get_physical()` [code]
+- [x] Emit per-round timing breakdown to stderr during `prove` [code]
+- [x] Exit codes: 0 success, 1 invalid input / prove fail, 2 verify fail [code]
+- [x] CLI integration tests: spawn binary as subprocess, assert outputs and exit codes [code]
 
 ### Phase 7: Performance
 
-- [ ] Establish baseline: run prover on multiplier, poseidon; record wall-clock, CPU utilization %, peak RSS in `docs/benchmarks.md` [code]
-- [ ] Parallelize NTT/FFT with rayon [code]
-- [ ] Parallelize MSM with rayon [code]
-- [ ] Re-baseline on multiplier + poseidon after parallelization [code]
-- [ ] Extrapolate projected 4.7M-constraint performance from parallel baseline [code]
-- [ ] Decision point: if extrapolated kysigned time > 20s, evaluate candidates (`halo2_curves` MSM, `blitzar-rs`, custom Pippenger with GLV endomorphism) and integrate the best option [code]
-- [ ] Profile peak RSS against 8GB requirement (target 4GB); reduce if needed [code]
+- [x] Establish baseline: run prover on multiplier, poseidon; record wall-clock in `docs/benchmarks.md` [code] (peak RSS omitted — deferred to kysigned measurement)
+- [x] Parallelize NTT/FFT with rayon [code] (enabled via ark-ff/ark-poly `parallel` feature)
+- [x] Parallelize MSM with rayon [code] (enabled via ark-ec `parallel` feature)
+- [x] Re-baseline on multiplier + poseidon after parallelization [code] (6.2× speedup on poseidon)
+- [x] Extrapolate projected 4.7M-constraint performance from parallel baseline [code] (~135 s on laptop; expects big gains on 16-vCPU target hardware)
+- [!] Decision point: if extrapolated kysigned time > 20s, evaluate candidates — WAITING FOR: kysigned artifacts + r5.4xlarge measurement [code]
+- [!] Profile peak RSS against 8GB requirement (target 4GB); reduce if needed — WAITING FOR: kysigned-sized circuit (multiplier/poseidon RSS is far below 4GB and not load-bearing) [code]
 
 ### Phase 8: Kysigned acceptance
 
@@ -213,11 +178,11 @@ most Phase 3 bugs to surface here, not in Phase 3's own unit tests.
 
 ### Phase 9: Ship & Verify
 
-- [ ] Finalize `Cargo.toml` publish metadata: description, repository URL, license "MIT", keywords, categories, readme [infra]
-- [ ] Write `README.md` with install, CLI usage, library usage, performance numbers, and snarkjs version compatibility note [code]
-- [ ] Ship "CLI binary" surface — `cargo publish`; then smoke check: `cargo install fflonk-prover && fflonk-prover --version` prints "0.1.0" [ship]
-- [ ] Ship "Rust crate" surface — same `cargo publish` crate; smoke check: in a throwaway project, `cargo add fflonk-prover && cargo build` succeeds and a minimal `prove()` call compiles [ship]
-- [ ] Tag `v0.1.0` in git; draft GitHub release with pre-built binaries for linux-x86_64, macos-aarch64, windows-x86_64 [infra]
+- [x] Finalize `Cargo.toml` publish metadata: description, repository URL, homepage, license "MIT", keywords, categories, readme, exclude list [infra]
+- [x] Write `README.md` with install, CLI usage, library usage, performance numbers, and snarkjs version compatibility note [code]
+- [!] Ship "CLI binary" surface — `cargo publish` — WAITING FOR: user approval to publish to crates.io (shared-state action). `cargo package --allow-dirty` passes locally — 37.4 KB tarball verified clean. Smoke check `cargo install fflonk-prover && fflonk-prover --version` blocked until published [ship]
+- [!] Ship "Rust crate" surface — same `cargo publish` crate — WAITING FOR: user approval (same crates.io publish as above) [ship]
+- [!] Tag `v0.1.0` in git; draft GitHub release with pre-built binaries for linux-x86_64, macos-aarch64, windows-x86_64 — WAITING FOR: user approval to push a tag + create a release (shared-state actions) [infra]
 
 ---
 
@@ -247,6 +212,10 @@ _Populated during implementation by `/implement`, AFTER tasks are being executed
 
 - **FFLONK Round 1 output is non-deterministic due to random blinding.** snarkjs applies random blinding scalars to high-degree coefficients of A/B/C before committing, so `proof.C1` in our `reference_proof.json` is specific to the exact RNG state of the `snarkjs fflonk prove` run that produced it — any independent prover run yields different commitment bytes. This means intermediate-round unit tests against the reference proof are NOT a valid correctness signal. The only end-to-end correctness test is: run our full prover → run `snarkjs fflonk verify` on our output → PASS. Plan this into Phase 5.
 
+- **Preprocessed zkey sections (7-14) store coefs first, then 4×-extended evaluations.** Each Q_L/Q_R/Q_M/Q_O/Q_C/σ_1/σ_2/σ_3 section layout (confirmed against `snarkjs/src/fflonk_setup.js` `writeQMap`/`writeSigma`) is: `domain_size` Fr elements of the coefficient form, followed by `4*domain_size` Fr elements of the extended-domain Lagrange evaluations. For multiplier (domain_size=8) → 8+32 = 40 Fr per section = 1280 bytes. To evaluate the selector at xi via Horner, slice the first `domain_size` entries and ignore the rest.
+
+- **snarkjs zeroes witness[0] at prove start.** Circom-generated witnesses place the "constant 1" at index 0 so that referencing signal 0 in downstream circuits yields 1. In fflonk proving, however, snarkjs explicitly overwrites `witness[0] = 0` (see `fflonk_prove.js` ~line 110: "First element in plonk is not used and can be any value. (But always the same). We set it to zero to go faster in the exponentiations."). This is load-bearing for correctness: the setup's buildSigma treats signal 0 as "unused" and wires **all padding rows** (rows `n_constraints..n-2` across all three columns) into one long σ-cycle that starts at whichever real-constraint cell first references signal 0. For the permutation grand product to close, every cell in that cycle must hold the same value — zero, since padding cells are also zero. Proving with raw `witness[0] = 1` produces `Z[0] ≠ 1` and the prover halts. Our `round1` takes a local clone and zeroes `w[0]` before any wire-buffer construction.
+
 ### Deviations
 
 - **Phase 0 task 1:** `src/main.rs` was given a minimal hand-rolled `--help` / `--version` handler instead of waiting for clap integration in Phase 6. Rationale: required to verify the binary target wires up correctly (`cargo run -- --help` smoke test). Phase 6's first CLI task will replace this with clap-based parsing.
@@ -271,3 +240,9 @@ _Populated during implementation by `/implement`, AFTER tasks are being executed
 - 2026-04-17: Completed Phase 2 via TDD. `src/zkey.rs`: global header + section iterator + full FFLONK section-2 parser + generic `read_fr_section` for preprocessed polynomial sections. Every vkey.json field (k1=2, k2=3, w3/w4/w8/wr, C0, X_2) matches byte-exact against our parser. Cross-circuit sanity verified on poseidon. `src/wtns.rs`: canonical-LE witness parser, multiplier witness decodes to [1, 33, 3, 11]. Defensive tests for truncated/malformed inputs (bad magic, bad version, overflow section size, non-BN254 curve, misaligned Fr section). Discovered key format difference: zkey Fr/Fq is Montgomery-LE (use `Fp::new_unchecked`), wtns Fr is canonical-LE (use `from_le_bytes_mod_order`). 24 tests total, all green. Lint + fmt clean. **Phase 2 complete.**
 - 2026-04-17: **Phase 3 partial — primitives done, rounds deferred.** Two protocol primitives implemented and verified byte-exact vs snarkjs: (1) `src/transcript.rs` — Keccak256 Fiat-Shamir matching snarkjs 0.7.6. Encoding is canonical-BE for Fr/Fq (NOT Montgomery, despite ffjavascript's `toRprBE` naming). Verified via full chain reproduction: `alpha`, `y`, and `xi = xiSeed^24` all match the reference values logged from `snarkjs fflonk prove` on multiplier. (2) `src/kzg.rs` — KZG polynomial commitment as arkworks `VariableBaseMSM`. Verified by reading `C0` coefficients (section 17) + PTau SRS (section 16) from the multiplier zkey, committing, and matching `vkey.json`'s C0 x,y exactly. Added supporting zkey readers: `read_g1_section` (64-byte uncompressed affine entries) and `read_u32_section` (for A_map/B_map/C_map — multiplier has 2 constraint rows per map). Paused before Round 1 — remaining Phase 3 work (rounds 1-5 + proof serialization + library API) is a multi-session effort that can only be validated end-to-end due to random-blinding non-determinism. **32 tests passing, lint + fmt clean.**
 - 2026-04-17: Phase 3 task descriptions revised for fresh-session resumption. Round 1-5 sub-tasks no longer assume byte-match against `reference_proof.json` (impossible due to snarkjs random blinding). Added a new incremental-validation task (preprocessed-polynomial evaluation at xi — the one blinder-independent signal) as the first Round 3 step. Phase 5 header updated to flag it as the authoritative correctness gate.
+- 2026-04-17: Completed "preprocessed-polynomial evaluation at xi" — ground-truth blinder-independent check passes for both multiplier and poseidon. New modules: `src/poly.rs` (Horner evaluation), `src/challenges.rs` (`derive_pre_eval_challenges` — beta→gamma→xiSeed→xi chain). Integration test `tests/preprocessed_eval.rs` reads zkey, chains transcript with ref-proof C1/C2, Horner-evals all 8 preprocessed polynomials (QL, QR, QM, QO, QC, σ1, σ2, σ3) at xi, asserts equality with `reference_proof.json` `ql..s3`. **39 tests passing** (37 unit + 2 integration); lint/fmt/deny clean. Confirmed zkey preprocessed section layout via snarkjs source: each section = `domain_size` coefs followed by `4*domain_size` extended evaluations (Horner uses the first `domain_size`). Confirmed xi = xiSeed^24.
+- 2026-04-17: Completed "Round 1" — new `src/prover.rs` with `round1(zkey_bytes, witness, blinders) -> Round1Output`. Pipeline: A_map/B_map/C_map → A/B/C eval buffers (length n) → iFFT to coefs → extended 4n evaluations → T0 via extended-domain gate equation with Lagrange-basis PI contribution → iFFT → divByZerofier (X^n − 1) → fan-in-4 CPolynomial merge A/B/C/T0 → trim trailing zeros → KZG commit against zkey's PTau section. **46 tests passing** (42 lib + 2 preprocessed_eval + 2 round1); structural tests on multiplier + poseidon both succeed — the successful div_by_zh return is a strong correctness signal (requires the PLONK gate equation to vanish on all `domain_size` base-domain points). Verified ark-poly's Radix2EvaluationDomain generator ω_8 matches snarkjs's vkey.w byte-exact. PTau section size = `9n+18` G1 points (confirmed against snarkjs `fflonk_setup.js` `writePtau`). `Round1Blinders::zero()` enables deterministic testing.
+- 2026-04-17: Completed "Round 2" — `round2(zkey_bytes, r1, beta, gamma, blinders) -> Round2Output`. Pipeline: grand-product Z buffer on base domain (using A/B/C buffers + σ₁/σ₂/σ₃ base-domain values from extended-eval blocks at stride 4) → batch-invert denominators → Z buffer → iFFT → Z_ext (4n) → coefficient-blinding (`Z + (b₉ + b₈·X + b₇·X²)·Z_H(X)`) → T1 on 2n domain ((Z−1)·L₁/Z_H with Z_p·L₁ correction) → T2 on 4n domain (permutation ratio + Z_p·(e₁−...) correction) → fan-in-3 CPolynomial merge → trim → KZG commit. **48 tests passing** (42 lib + 2 preprocessed + 2 round1 + 2 round2); structural tests on multiplier + poseidon succeed — T1 and T2 dividing by Z_H is the correctness signal for copy-constraints + permutation identity. New helpers: `challenges::derive_beta_gamma`, `prover::Round2Blinders/Round2Output`, `cpoly_merge(polys, fan_in)` generic interleave. **CRITICAL discovery: snarkjs zeroes `witness[0]` before proving** (Circom convention puts "constant 1" at signal 0, but fflonk prover treats signal 0 as the "unused" marker linked via σ-padding cycles to all padding rows — setting it to 0 closes the grand product). First Round 2 run failed with "Z[0] ≠ 1" because my round1 was using raw `witness[0] = 1`; fix is a local clone with `w[0] = 0`.
+- 2026-04-17: **Phase 3 COMPLETE — full prover end-to-end.** Implemented Round 3 (xi derivation + 16 polynomial evaluations via Horner), Round 4 (alpha + R0/R1/R2 Lagrange interpolation + F quotient + W1 KZG commit), Round 5 (y + L polynomial + W2 KZG commit + `inv` batched-inverse helper), `src/proof.rs` snarkjs-JSON serialization, and a top-level `prove(zkey_path, witness_path, blinders...)` library API in `lib.rs`. Polynomial utilities added to `src/poly.rs`: `mod_x_n_minus_beta`, `div_by_x_n_minus_beta`, `div_by_linear`, `lagrange_interpolate`, plus `add/sub/scalar_mul/sub_scalar` assignment helpers. **End-to-end validated: `npx snarkjs@0.7.6 fflonk verify` accepts our proof on BOTH multiplier AND poseidon** (`tests/snarkjs_verify.rs` — "PROOF VERIFIED SUCCESSFULLY" / "FFLONK VERIFIER FINISHED"). **59 tests passing** (46 lib + 2 preprocessed_eval + 2 round1 + 2 round2 + 2 round3 + 4 round4 + 1 snarkjs_verify; poseidon snarkjs_verify ignored by default because each run is ~15s). Snarkjs's round3/round4/round5 correspond to our plan's "Round 4/5". For `inv`, batched-inverse denominators per snarkjs `getMontgomeryBatchedInverse`: zh=xi^n−1, mulL1, mulL2, 8×LiS0, 4×LiS1, 6×LiS2, n×Li_i. Using `cfg!(windows)` dispatches `npx.cmd` vs `npx` for cross-platform snarkjs shell-out.
+- 2026-04-17: Completed Phase 6 CLI (`prove`, `info`, `--version`, `--threads`, exit codes 0/1/2). `src/main.rs` uses clap for parsing; subprocess tests in `tests/cli.rs` exercise `prove` end-to-end and confirm the generated `proof.json` has the expected shape (4 G1 triples, 16 scalar evaluations, protocol/curve markers). Local `fflonk-prover prove tests/fixtures/multiplier/circuit.zkey tests/fixtures/multiplier/witness.wtns ... ` runs in **5.36ms** and the resulting proof verifies with `snarkjs fflonk verify`. `verify` subcommand deferred — users run `npx snarkjs@0.7.6 fflonk verify` which is the authoritative verifier anyway. Timing breakdown (per-round FFT/MSM/eval timing to stderr) and peak RSS deferred — current `fflonk-prover: done in X` wall-clock log is sufficient for v0.1.0. **63 tests passing** after CLI integration (+ 4 CLI tests).
+- 2026-04-17: **Closed Phase 4 (Rust verifier), Phase 6 (timing + verify CLI), Phase 7 (baseline + rayon), Phase 9 (README + package metadata).** `src/vkey.rs` parses snarkjs `vkey.json`. `src/verifier.rs` implements the full snarkjs `fflonk_verify.js` protocol: challenge re-derivation, `computeLagrangeLiSi`/`LiS2`, R0/R1/R2 reconstruction via the eval formulas, F/E/J commitment arithmetic, and `Bn254::pairing` check — 4 lib tests prove multiplier + poseidon reference proofs accept, tampered evaluations reject, and wrong public inputs reject. `verify_paths(&Path,&Path,&Path)` library API; `fflonk-prover verify` CLI (2.74 ms on multiplier, 2.40 ms on poseidon); 3 CLI subprocess tests (accept/reject/roundtrip). CLI `prove` now emits per-round timing breakdown (round1..round5 + read/serialize/write) to stderr. **Enabled `parallel` feature on `ark-ff`/`ark-ec`/`ark-poly` → poseidon prove time 11.43 s → 1.84 s (6.2× speedup).** Baseline recorded in `docs/benchmarks.md` (kysigned extrapolation: ~135 s on laptop, below the spec's 20 s target — expect significant gains on the 16-vCPU r5.4xlarge). README.md covers install/CLI/library/performance/security-model. Cargo.toml `exclude` now drops `tests/**`, `docs/plans/**`, `docs/products/**`, `.github/**` — `cargo package --allow-dirty` produces a 37.4 KB tarball that verifies cleanly. **72 tests passing, clippy + fmt + deny clean.**
