@@ -1,0 +1,42 @@
+# cargo-deny configuration for fflonk-prover
+#
+# Enforces spec F7.1: all dependencies must be MIT or Apache-2.0
+# (or dual MIT/Apache-2.0). No copyleft (GPL/LGPL/MPL/etc).
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[licenses]
+# Permissive allowlist per spec F7.1. Unlisted licenses fail.
+# Intent: no copyleft (GPL/LGPL/AGPL/MPL/EPL/CDDL). Permissive-only.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

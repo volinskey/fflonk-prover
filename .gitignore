@@ -1,0 +1,12 @@
+/target
+*.swp
+*.swo
+.idea/
+.vscode/
+.DS_Store
+
+# Fixture generation workspace (inputs are large, outputs are committed under tests/fixtures/)
+/fixtures-src/
+
+# Node modules — circomlib is installed only for fixture generation, never imported into crate
+/node_modules/

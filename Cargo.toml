@@ -1,0 +1,45 @@
+[package]
+name = "fflonk-prover"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Native Rust FFLONK prover for Circom R1CS circuits, byte-compatible with snarkjs verifiers"
+repository = "https://github.com/kychee/fflonk-prover"
+readme = "README.md"
+keywords = ["zero-knowledge", "snark", "fflonk", "circom", "bn254"]
+categories = ["cryptography", "command-line-utilities"]
+# Test fixtures are large (poseidon zkey ≈ 150 MB) and kysigned fixtures
+# will be bigger. They're for in-repo testing only, not consumers.
+exclude = [
+    "/tests/fixtures/**",
+    "/fixtures-src/**",
+    "/circuits/**",
+    "/scripts/**",
+    "/node_modules/**",
+    "/package.json",
+    "/package-lock.json",
+]
+
+[lib]
+name = "fflonk_prover"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fflonk-prover"
+path = "src/main.rs"
+
+[dependencies]
+ark-bn254 = "0.5"
+ark-ff = "0.5"
+ark-ec = "0.5"
+ark-poly = "0.5"
+ark-serialize = "0.5"
+rayon = "1.10"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+sha3 = "0.10"
+
+[dev-dependencies]
