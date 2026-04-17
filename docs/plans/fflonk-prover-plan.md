@@ -180,8 +180,11 @@ most Phase 3 bugs to surface here, not in Phase 3's own unit tests.
 
 - [x] Finalize `Cargo.toml` publish metadata: description, repository URL, homepage, license "MIT", keywords, categories, readme, exclude list [infra]
 - [x] Write `README.md` with install, CLI usage, library usage, performance numbers, and snarkjs version compatibility note [code]
-- [!] Ship "CLI binary" surface — `cargo publish` — WAITING FOR: user approval to publish to crates.io (shared-state action). `cargo package --allow-dirty` passes locally — 37.4 KB tarball verified clean. Smoke check `cargo install fflonk-prover && fflonk-prover --version` blocked until published [ship]
-- [!] Ship "Rust crate" surface — same `cargo publish` crate — WAITING FOR: user approval (same crates.io publish as above) [ship]
+- [ ] Pre-publish gate: `cargo package --allow-dirty` produces a clean tarball and the verify step (`cargo publish --dry-run`) succeeds [infra]
+- [ ] Pre-publish gate: install from local tarball — in a clean temp directory, run `cargo install --path . --locked`, then `fflonk-prover --version` + `fflonk-prover prove <fixture> ... && fflonk-prover verify ...` end-to-end. Simulates `cargo install fflonk-prover` from a user's perspective without burning a crates.io version [code]
+- [ ] Pre-publish gate: consumer crate smoke — in a throwaway project, add `fflonk-prover = { path = "../fflonk-prover" }`, write a `main.rs` that calls `prove()` and `verify_paths()`, confirm `cargo build && cargo run` succeeds with exit 0. Simulates `cargo add fflonk-prover` from a library user's perspective [code]
+- [!] Ship "CLI binary" surface — `cargo publish` (only after pre-publish gates pass) — WAITING FOR: user approval to publish to crates.io (shared-state, irreversible). Post-publish smoke: `cargo install fflonk-prover` from crates.io in a clean directory prints "0.1.0" [ship]
+- [!] Ship "Rust crate" surface — same `cargo publish` crate — WAITING FOR: user approval. Post-publish smoke: throwaway project with `fflonk-prover = "0.1"` from crates.io builds and runs [ship]
 - [!] Tag `v0.1.0` in git; draft GitHub release with pre-built binaries for linux-x86_64, macos-aarch64, windows-x86_64 — WAITING FOR: user approval to push a tag + create a release (shared-state actions) [infra]
 
 ---
