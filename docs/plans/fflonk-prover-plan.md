@@ -6,7 +6,7 @@
 **Spec:** docs/products/fflonk-prover/fflonk-prover-spec.md
 **Spec-Version:** 0.1.1
 **Source:** spec
-**Worktree:** ../fflonk-prover-worktree
+**Worktree:** none (merged back to main 2026-04-17)
 
 ## Legend
 - `[ ]` Todo | `[~]` In Progress | `[x]` Done
