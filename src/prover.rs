@@ -183,9 +183,24 @@ pub fn round1(
 /// (computed from additions), or zero fallback. Signals up to
 /// `nVars - nAdditions` map to `witness[id]`; the next `nAdditions` entries
 /// map to `internal_witness[id - diff]`; anything beyond `nVars` is zero.
-fn get_witness(id: u32, witness: &[Fr], internal_witness: &[Fr], n_vars: usize) -> Fr {
+///
+/// `n_additions` is the TOTAL number of additions (= FINAL length of the
+/// internal-witness buffer). During the incremental build inside
+/// `compute_internal_witness`, the `internal_witness` slice is shorter than
+/// `n_additions` — but `diff` must still be based on the final count to
+/// match snarkjs's pre-allocated-buffer semantics. Using
+/// `internal_witness.len()` as `diff` gave wrong indices for earlier
+/// additions and broke the gate polynomial's divisibility by Z_H on the
+/// kysigned circuit.
+fn get_witness(
+    id: u32,
+    witness: &[Fr],
+    internal_witness: &[Fr],
+    n_vars: usize,
+    n_additions: usize,
+) -> Fr {
     let idx = id as usize;
-    let diff = n_vars.saturating_sub(internal_witness.len());
+    let diff = n_vars - n_additions;
     if idx < diff {
         witness.get(idx).copied().unwrap_or(Fr::zero())
     } else if idx < n_vars {
@@ -203,10 +218,11 @@ fn get_witness(id: u32, witness: &[Fr], internal_witness: &[Fr], n_vars: usize) 
 /// Because additions are emitted in topological order by snarkjs (each entry
 /// can only reference earlier entries), a single forward pass suffices.
 pub fn compute_internal_witness(witness: &[Fr], additions: &[Addition], n_vars: usize) -> Vec<Fr> {
-    let mut internal = Vec::with_capacity(additions.len());
+    let n_additions = additions.len();
+    let mut internal = Vec::with_capacity(n_additions);
     for add in additions {
-        let aw = get_witness(add.a, witness, &internal, n_vars);
-        let bw = get_witness(add.b, witness, &internal, n_vars);
+        let aw = get_witness(add.a, witness, &internal, n_vars, n_additions);
+        let bw = get_witness(add.b, witness, &internal, n_vars, n_additions);
         internal.push(aw * add.factor_a + bw * add.factor_b);
     }
     internal
@@ -232,10 +248,11 @@ fn build_wire_polynomials(
     let mut b_buf = vec![Fr::zero(); n];
     let mut c_buf = vec![Fr::zero(); n];
 
+    let n_additions = internal_witness.len();
     for i in 0..n_constraints {
-        a_buf[i] = get_witness(a_map[i], witness, internal_witness, n_vars);
-        b_buf[i] = get_witness(b_map[i], witness, internal_witness, n_vars);
-        c_buf[i] = get_witness(c_map[i], witness, internal_witness, n_vars);
+        a_buf[i] = get_witness(a_map[i], witness, internal_witness, n_vars, n_additions);
+        b_buf[i] = get_witness(b_map[i], witness, internal_witness, n_vars, n_additions);
+        c_buf[i] = get_witness(c_map[i], witness, internal_witness, n_vars, n_additions);
     }
 
     // Blinding: overwrite last two domain-evaluation slots of each buffer.
@@ -301,10 +318,11 @@ fn compute_t0(
     // additions may map public-input slots to virtual signals).
     let a_map = read_u32_section(zkey_bytes, SECTION_A_MAP)?;
     let n_vars = header.n_vars as usize;
+    let n_additions = internal_witness.len();
     let public_evals: Vec<Fr> = a_map
         .iter()
         .take(n_public)
-        .map(|&sig| get_witness(sig, witness, internal_witness, n_vars))
+        .map(|&sig| get_witness(sig, witness, internal_witness, n_vars, n_additions))
         .collect();
 
     let mut t0_num_ext = vec![Fr::zero(); four_n];
