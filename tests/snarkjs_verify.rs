@@ -118,3 +118,25 @@ fn multiplier_proof_verifies_with_snarkjs() {
 fn poseidon_proof_verifies_with_snarkjs() {
     run_verify_test(Path::new("tests/fixtures/poseidon"));
 }
+
+/// Phase 8 acceptance gate: the ~4.7M-constraint kysigned-approval circuit.
+/// The zkey is multi-GB and lives in S3 — this test silently skips if
+/// `circuit.zkey` isn't locally present (fetched via
+/// `tests/fixtures/kysigned/fetch-fixture.sh` or regenerated via
+/// `scripts/regenerate-kysigned-fixture.sh`). This way CI doesn't need S3
+/// credentials.
+#[test]
+#[ignore = "acceptance gate (many-minute run); run with --ignored after fetching the zkey"]
+fn kysigned_proof_verifies_with_snarkjs() {
+    let dir = Path::new("tests/fixtures/kysigned");
+    if !dir.join("circuit.zkey").exists() {
+        eprintln!(
+            "SKIP: {}/circuit.zkey not present. Run \
+             tests/fixtures/kysigned/fetch-fixture.sh or \
+             scripts/regenerate-kysigned-fixture.sh first.",
+            dir.display()
+        );
+        return;
+    }
+    run_verify_test(dir);
+}

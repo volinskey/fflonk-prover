@@ -20,19 +20,29 @@ This document covers the tooling you need to work on `fflonk-prover`. CI uses co
 
 ### Powers of Tau
 
-The Phase 1 Hermez SRS (`powersOfTau28_hez_final_23.ptau`, ~9 GB, supports up to 2²³ = 8.4M constraints) is used once to generate FFLONK proving/verification keys via snarkjs. It is NOT committed to the repo (too large) and NOT required by CI — CI uses committed fixtures.
+Two Hermez PTau files are used in this project:
 
-Two sources:
+| File | Size | Supports | Used for |
+|------|------|----------|----------|
+| `powersOfTau28_hez_final_23.ptau` | ~9.7 GB | 2²³ constraints (FFLONK needs up to 2²⁰ circuits) | `multiplier`, `poseidon` fixtures |
+| `powersOfTau28_hez_final_26.ptau` | ~77 GB | 2²⁶ constraints (FFLONK needs up to 2²³ circuits) | `kysigned-approval` fixture (~4.7M constraints) |
+
+**Why FFLONK setup needs a larger PTau than the circuit's domain_size suggests:** FFLONK's `fflonk setup` requires Section 2 (G1 series) of the PTau to hold at least `(9 · domain_size + 18) · 64` bytes. For `domain_size = 2^23`, that's ~4.83 GB of G1 points. The `_final_23.ptau` Section 2 holds only ~1 GB — so we need `_final_26.ptau` for anything near 2²³ constraints.
+
+PTau files are NOT committed to the repo (too large) and NOT required by CI — CI uses committed fixtures.
 
 **Kychee S3 (fast, if you have AWS access):**
 ```bash
-aws s3 cp s3://kychee-zkprover-artifacts/shared/powersOfTau28_hez_final_23.ptau fixtures-src/ptau/
+aws s3 cp s3://kychee-zkprover-artifacts/shared/powersOfTau28_hez_final_23.ptau fixtures-src/ptau/ --profile kychee
+# _final_26.ptau is not yet in S3; use the Hermez fallback below.
 ```
 
 **Hermez canonical (public, free, slower):**
 ```bash
 curl -L -o fixtures-src/ptau/powersOfTau28_hez_final_23.ptau \
   https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_23.ptau
+curl -L -o fixtures-src/ptau/powersOfTau28_hez_final_26.ptau \
+  https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_26.ptau
 ```
 
 The `fixtures-src/` directory is gitignored.
@@ -41,7 +51,7 @@ The `fixtures-src/` directory is gitignored.
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Foundry (anvil + forge) | latest | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` (Linux/macOS) — see [book.getfoundry.sh](https://book.getfoundry.sh) for Windows |
+| Foundry (anvil + forge) | 1.5.1-stable (pinned for Phase 8 acceptance — any 1.x works) | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` (Linux/macOS, and Git Bash on Windows). Installs to `~/.foundry/bin` — add to PATH or `export PATH="$HOME/.foundry/bin:$PATH"` in your shell rc. |
 
 ## Verify your setup
 

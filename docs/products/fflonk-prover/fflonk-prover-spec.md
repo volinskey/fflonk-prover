@@ -8,6 +8,8 @@ created: 2026-04-16
 updated: 2026-04-17
 ---
 
+> **📎 Relocation note (2026-04-18):** This spec is ALSO maintained at **`kysigned-private/docs/product/prover/fflonk-prover-spec.md`** per kysigned-spec v0.15.0 F20 (sub-product specs live in kysigned-private). Both copies are kept in sync while fflonk-prover continues dev in this standalone repo; when the fflonk-prover code merges into the public kysigned repo (kysigned-plan Phase 2F.F), this standalone-repo copy becomes historical and the kysigned-private copy is authoritative going forward. Any future spec edits should update BOTH locations until the merge happens.
+
 ## Overview
 
 `fflonk-prover` is a native Rust FFLONK prover that consumes Circom-generated R1CS constraints and produces proofs verifiable by snarkjs-generated Solidity verifiers. It exists because snarkjs (the standard JavaScript prover) is too slow for production use ($3/proof), while the only fast native prover (rapidsnark) only supports Groth16 which requires a per-circuit Phase 2 ceremony. This prover fills the gap: native speed + FFLONK proof system (no Phase 2 ceremony needed).

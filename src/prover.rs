@@ -28,10 +28,10 @@ use crate::poly::{
 };
 use crate::transcript::Keccak256Transcript;
 use crate::zkey::{
-    read_fflonk_header, read_fr_section, read_g1_section, read_u32_section, FflonkHeader,
-    ZkeyError, SECTION_A_MAP, SECTION_B_MAP, SECTION_C0, SECTION_C_MAP, SECTION_LAGRANGE,
-    SECTION_PTAU, SECTION_QC, SECTION_QL, SECTION_QM, SECTION_QO, SECTION_QR, SECTION_SIGMA1,
-    SECTION_SIGMA2, SECTION_SIGMA3,
+    read_additions, read_fflonk_header, read_fr_section, read_g1_section, read_u32_section,
+    Addition, FflonkHeader, ZkeyError, SECTION_A_MAP, SECTION_B_MAP, SECTION_C0, SECTION_C_MAP,
+    SECTION_LAGRANGE, SECTION_PTAU, SECTION_QC, SECTION_QL, SECTION_QM, SECTION_QO, SECTION_QR,
+    SECTION_SIGMA1, SECTION_SIGMA2, SECTION_SIGMA3,
 };
 
 #[derive(Debug, Error)]
@@ -127,12 +127,32 @@ pub fn round1(
         w[0] = Fr::zero();
     }
 
+    // Build the internal-witness table (empty if no additions).
+    // Snarkjs's `getWitness(id)` transparently handles three ranges:
+    //   - `id < nVars - nAdditions`: direct `witness[id]`
+    //   - `id < nVars`: computed `internal_witness[id - diff]`
+    //   - otherwise: `Fr::zero()` fallback
+    // For circuits where the R1CS→PLONK transpiler coalesces constraints
+    // (kysigned-approval: nAdditions ≈ 3.7M), the wire maps reference
+    // signal ids in the middle range.
+    let additions = read_additions(zkey_bytes)?;
+    let n_vars = header.n_vars as usize;
+    let internal_witness = compute_internal_witness(&w, &additions, n_vars);
+
     let (a_buf, b_buf, c_buf, a_poly, b_poly, c_poly) =
-        build_wire_polynomials(zkey_bytes, &w, n, blinders)?;
+        build_wire_polynomials(zkey_bytes, &w, &internal_witness, n_vars, n, blinders)?;
     let a_ext = extended_evaluations(&a_poly, n)?;
     let b_ext = extended_evaluations(&b_poly, n)?;
     let c_ext = extended_evaluations(&c_poly, n)?;
-    let t0_poly = compute_t0(zkey_bytes, &header, &a_ext, &b_ext, &c_ext, &w)?;
+    let t0_poly = compute_t0(
+        zkey_bytes,
+        &header,
+        &a_ext,
+        &b_ext,
+        &c_ext,
+        &w,
+        &internal_witness,
+    )?;
     let c1_coeffs = cpoly_fan_in_4_merge(&[&a_poly, &b_poly, &c_poly, &t0_poly]);
 
     // KZG commit only needs coefficients up to the last non-zero term. The
@@ -159,17 +179,46 @@ pub fn round1(
     })
 }
 
+/// Snarkjs's `getWitness(id)`: three ranges — direct witness, internal
+/// (computed from additions), or zero fallback. Signals up to
+/// `nVars - nAdditions` map to `witness[id]`; the next `nAdditions` entries
+/// map to `internal_witness[id - diff]`; anything beyond `nVars` is zero.
+fn get_witness(id: u32, witness: &[Fr], internal_witness: &[Fr], n_vars: usize) -> Fr {
+    let idx = id as usize;
+    let diff = n_vars.saturating_sub(internal_witness.len());
+    if idx < diff {
+        witness.get(idx).copied().unwrap_or(Fr::zero())
+    } else if idx < n_vars {
+        internal_witness
+            .get(idx - diff)
+            .copied()
+            .unwrap_or(Fr::zero())
+    } else {
+        Fr::zero()
+    }
+}
+
+/// Compute the internal witness values from the Additions section.
+/// Each addition defines `internal[i] = factor_a · get_witness(a) + factor_b · get_witness(b)`.
+/// Because additions are emitted in topological order by snarkjs (each entry
+/// can only reference earlier entries), a single forward pass suffices.
+pub fn compute_internal_witness(witness: &[Fr], additions: &[Addition], n_vars: usize) -> Vec<Fr> {
+    let mut internal = Vec::with_capacity(additions.len());
+    for add in additions {
+        let aw = get_witness(add.a, witness, &internal, n_vars);
+        let bw = get_witness(add.b, witness, &internal, n_vars);
+        internal.push(aw * add.factor_a + bw * add.factor_b);
+    }
+    internal
+}
+
 /// Build A, B, C wire polynomials in coefficient form (length = domain_size).
-///
-/// Snarkjs reads signals via `getWitness(id)` which transparently handles
-/// "additions" — a zkey-level optimization where some witness positions are
-/// linear combinations rather than single signals. Full `getWitness` support
-/// is out of scope for now; the multiplier and poseidon fixtures are both
-/// small enough not to hit it.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn build_wire_polynomials(
     zkey_bytes: &[u8],
     witness: &[Fr],
+    internal_witness: &[Fr],
+    n_vars: usize,
     n: usize,
     blinders: &Round1Blinders,
 ) -> Result<(Vec<Fr>, Vec<Fr>, Vec<Fr>, Vec<Fr>, Vec<Fr>, Vec<Fr>), ProverError> {
@@ -183,18 +232,10 @@ fn build_wire_polynomials(
     let mut b_buf = vec![Fr::zero(); n];
     let mut c_buf = vec![Fr::zero(); n];
 
-    let get = |w: &[Fr], id: u32| -> Result<Fr, ProverError> {
-        let idx = id as usize;
-        w.get(idx).copied().ok_or(ProverError::WitnessOutOfRange {
-            signal: id,
-            len: w.len(),
-        })
-    };
-
     for i in 0..n_constraints {
-        a_buf[i] = get(witness, a_map[i])?;
-        b_buf[i] = get(witness, b_map[i])?;
-        c_buf[i] = get(witness, c_map[i])?;
+        a_buf[i] = get_witness(a_map[i], witness, internal_witness, n_vars);
+        b_buf[i] = get_witness(b_map[i], witness, internal_witness, n_vars);
+        c_buf[i] = get_witness(c_map[i], witness, internal_witness, n_vars);
     }
 
     // Blinding: overwrite last two domain-evaluation slots of each buffer.
@@ -228,6 +269,7 @@ fn extended_evaluations(coefs: &[Fr], n: usize) -> Result<Vec<Fr>, ProverError> 
 ///
 /// Works on the 4n-domain: we compute the numerator's evaluations at every
 /// 4n-th root of unity, iFFT to coefficient form, then divide by Z_H = X^n - 1.
+#[allow(clippy::too_many_arguments)]
 fn compute_t0(
     zkey_bytes: &[u8],
     header: &FflonkHeader,
@@ -235,6 +277,7 @@ fn compute_t0(
     b_ext: &[Fr],
     c_ext: &[Fr],
     witness: &[Fr],
+    internal_witness: &[Fr],
 ) -> Result<Vec<Fr>, ProverError> {
     let n = header.domain_size as usize;
     let four_n = 4 * n;
@@ -253,22 +296,16 @@ fn compute_t0(
     let lagrange = read_fr_section(zkey_bytes, SECTION_LAGRANGE)?;
     let n_public = header.n_public as usize;
 
-    // Precompute the base-domain evaluations at public-input rows — these are
-    // exactly the witness values at a_map[j] for j in [0, n_public).
+    // Precompute the base-domain evaluations at public-input rows — the j-th
+    // public input is `get_witness(a_map[j])` (not a raw witness[a_map[j]] —
+    // additions may map public-input slots to virtual signals).
     let a_map = read_u32_section(zkey_bytes, SECTION_A_MAP)?;
+    let n_vars = header.n_vars as usize;
     let public_evals: Vec<Fr> = a_map
         .iter()
         .take(n_public)
-        .map(|&sig| {
-            witness
-                .get(sig as usize)
-                .copied()
-                .ok_or(ProverError::WitnessOutOfRange {
-                    signal: sig,
-                    len: witness.len(),
-                })
-        })
-        .collect::<Result<_, _>>()?;
+        .map(|&sig| get_witness(sig, witness, internal_witness, n_vars))
+        .collect();
 
     let mut t0_num_ext = vec![Fr::zero(); four_n];
     for i in 0..four_n {

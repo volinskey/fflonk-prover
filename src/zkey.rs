@@ -313,6 +313,64 @@ pub fn read_fflonk_header(bytes: &[u8]) -> Result<FflonkHeader, ZkeyError> {
     })
 }
 
+/// One entry of the zkey Additions section (section 3). Encodes a
+/// linear-combination "virtual" witness: `internal[i] = factor_a · witness[a] + factor_b · witness[b]`.
+///
+/// Snarkjs emits these when the R1CS-to-PLONK transpiler coalesces multiple
+/// R1CS constraints into one PLONK gate — the coalesced operands become
+/// virtual signals referenced by the wire maps but not present in the raw
+/// `.wtns` file.
+///
+/// On-disk layout per entry (72 bytes):
+///   - `a`: u32, LE — signal id of first operand
+///   - `b`: u32, LE — signal id of second operand
+///   - `factor_a`: Fr, Montgomery-LE (32 bytes)
+///   - `factor_b`: Fr, Montgomery-LE (32 bytes)
+#[derive(Debug, Clone, Copy)]
+pub struct Addition {
+    pub a: u32,
+    pub b: u32,
+    pub factor_a: Fr,
+    pub factor_b: Fr,
+}
+
+/// Reads the Additions section (type 3). Returns an empty Vec if the
+/// section is absent or has size 0 — both are valid (no additions circuit).
+pub fn read_additions(bytes: &[u8]) -> Result<Vec<Addition>, ZkeyError> {
+    const ENTRY_SIZE: u64 = 4 + 4 + 32 + 32;
+    let metas = section_metas(bytes)?;
+    let meta = match metas.iter().find(|m| m.section_type == SECTION_ADDITIONS) {
+        Some(m) => m,
+        None => return Ok(Vec::new()),
+    };
+    if meta.size == 0 {
+        return Ok(Vec::new());
+    }
+    if meta.size % ENTRY_SIZE != 0 {
+        return Err(ZkeyError::SectionNotFrAligned {
+            section_type: SECTION_ADDITIONS,
+            size: meta.size,
+        });
+    }
+    let n = (meta.size / ENTRY_SIZE) as usize;
+    let mut out = Vec::with_capacity(n);
+    let mut c = meta.data_offset as usize;
+    for _ in 0..n {
+        let a = u32::from_le_bytes(bytes[c..c + 4].try_into().unwrap());
+        let b = u32::from_le_bytes(bytes[c + 4..c + 8].try_into().unwrap());
+        let factor_a = fr_from_mont_le(&bytes[c + 8..c + 40]);
+        let factor_b = fr_from_mont_le(&bytes[c + 40..c + 72]);
+        out.push(Addition {
+            a,
+            b,
+            factor_a,
+            factor_b,
+        });
+        c += ENTRY_SIZE as usize;
+    }
+    Ok(out)
+}
+
 /// Reads every u32 entry from a section. Used for A_map/B_map/C_map sections:
 /// each entry is a witness index telling which witness wire feeds into the
 /// A / B / C column at constraint row i.
@@ -637,6 +695,50 @@ mod tests {
         assert_eq!(a_map.len(), 2);
         assert_eq!(b_map.len(), 2);
         assert_eq!(c_map.len(), 2);
+    }
+
+    // --- Additions section tests ---
+
+    #[test]
+    fn multiplier_has_no_additions() {
+        let bytes = load_multiplier();
+        let additions = read_additions(&bytes).expect("read additions");
+        assert!(
+            additions.is_empty(),
+            "multiplier circuit has no additions (simple R1CS)"
+        );
+    }
+
+    #[test]
+    fn read_additions_parses_synthetic_section() {
+        use ark_ff::Zero;
+
+        // Synthetic zkey: header + 1 section (type 3, additions) with 2 entries.
+        // Entry layout: a(u32) + b(u32) + factor_a(Fr mont LE, 32B) + factor_b(Fr mont LE, 32B) = 72B.
+        // Factors set to all-zero bytes → Fr::zero() (Montgomery encoding of 0 is 0). This
+        // validates the STRUCTURAL parse (offsets, counts, a/b u32 ids); real-factor
+        // arithmetic is covered by the end-to-end kysigned test.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"zkey");
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // version
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // nSections
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // section type = 3
+        bytes.extend_from_slice(&(2u64 * 72).to_le_bytes()); // size
+        for (a, b) in [(7u32, 11u32), (13u32, 17u32)] {
+            bytes.extend_from_slice(&a.to_le_bytes());
+            bytes.extend_from_slice(&b.to_le_bytes());
+            bytes.extend_from_slice(&[0u8; 32]); // factor_a
+            bytes.extend_from_slice(&[0u8; 32]); // factor_b
+        }
+
+        let additions = read_additions(&bytes).expect("parse additions");
+        assert_eq!(additions.len(), 2);
+        assert_eq!(additions[0].a, 7);
+        assert_eq!(additions[0].b, 11);
+        assert_eq!(additions[1].a, 13);
+        assert_eq!(additions[1].b, 17);
+        assert!(additions[0].factor_a.is_zero());
+        assert!(additions[1].factor_b.is_zero());
     }
 
     // --- Cross-circuit sanity: parser generalizes to poseidon (larger domain) ---

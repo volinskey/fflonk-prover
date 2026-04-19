@@ -166,11 +166,28 @@ most Phase 3 bugs to surface here, not in Phase 3's own unit tests.
 - [x] Extrapolate projected 4.7M-constraint performance from parallel baseline [code] (~135 s on laptop; expects big gains on 16-vCPU target hardware)
 - [!] Decision point: if extrapolated kysigned time > 20s, evaluate candidates — WAITING FOR: kysigned artifacts + r5.4xlarge measurement [code]
 - [!] Profile peak RSS against 8GB requirement (target 4GB); reduce if needed — WAITING FOR: kysigned-sized circuit (multiplier/poseidon RSS is far below 4GB and not load-bearing) [code]
+- [ ] r5.4xlarge re-measurement pre-crates.io publish: re-run Phase 8 prover perf on a 16-vCPU r5.4xlarge, record wall-clock/RSS/CPU%, verify the <20s F3.2 gate. BLOCKS Phase 9 `cargo publish` — laptop waiver per DD-2 is acceptable for dev-cycle gate but not for shipping public v0.1.0 [infra]
 
 ### Phase 8: Kysigned acceptance
 
-- [ ] Receive kysigned-approval circuit artifacts from user: `.r1cs`, `.wasm`, sample input JSONs [manual]
-- [ ] Generate kysigned fixtures via snarkjs 0.7.6: zkey, vkey, witness for sample inputs, reference proof.json, Solidity verifier; commit to `tests/fixtures/kysigned/` [manual]
+- [x] Receive kysigned-approval circuit artifacts from user: `.r1cs`, `.wasm`, sample input JSONs [manual]
+- [~] Generate kysigned fixtures via snarkjs 0.7.6: zkey, vkey, witness for sample inputs, reference proof.json, Solidity verifier [manual]
+  - [ ] Create `tests/fixtures/kysigned/` + `.gitignore` excluding `*.zkey`
+  - [ ] Copy (not read-into-mem) r1cs + wasm + input.json into fixture dir
+  - [ ] Install Foundry so Phase 8.175 Anvil test can run later (parallel)
+  - [ ] Capacity check: RAM + disk free before starting snarkjs setup
+  - [ ] `snarkjs fflonk setup` → `circuit.zkey`
+  - [ ] `snarkjs zkey export verificationkey` → `vkey.json`
+  - [ ] `snarkjs wtns calculate` → `witness.wtns`
+  - [ ] `snarkjs fflonk prove` → `reference_proof.json`, `reference_public.json`
+  - [ ] `snarkjs fflonk verify` on the reference proof (sanity — proves fixture is valid)
+  - [ ] `snarkjs zkey export solidityverifier` → `Verifier.sol`
+  - [ ] Upload `circuit.zkey` to `s3://kychee-zkprover-artifacts/fflonk-prover-test-fixture/v0.1.0/` (AWS profile: kychee)
+  - [ ] Write `tests/fixtures/kysigned/hashes.manifest` (SHA-256 of each artifact)
+  - [ ] Write `tests/fixtures/kysigned/fetch-fixture.sh` (downloads from S3 + verifies hashes)
+  - [ ] Write `tests/fixtures/kysigned/README.md` (S3 location, hash manifest, regeneration instructions)
+  - [ ] Commit small artifacts (`vkey.json`, `Verifier.sol`, `witness.wtns`, `reference_proof.json`, `reference_public.json`, `input.json`) + manifest + script + README
+  - [ ] Document Foundry version in `docs/dev-setup.md`
 - [ ] Run our prover on kysigned witness → `snarkjs fflonk verify` PASS [code]
 - [ ] Run our prover on kysigned witness → Anvil on-chain verify PASS [code]
 - [ ] Measure kysigned perf on 16-vCPU r5.4xlarge: wall-clock, peak RSS, CPU% — record in `docs/benchmarks.md` [code]
@@ -216,6 +233,14 @@ _Populated during implementation by `/implement`, AFTER tasks are being executed
 - **FFLONK Round 1 output is non-deterministic due to random blinding.** snarkjs applies random blinding scalars to high-degree coefficients of A/B/C before committing, so `proof.C1` in our `reference_proof.json` is specific to the exact RNG state of the `snarkjs fflonk prove` run that produced it — any independent prover run yields different commitment bytes. This means intermediate-round unit tests against the reference proof are NOT a valid correctness signal. The only end-to-end correctness test is: run our full prover → run `snarkjs fflonk verify` on our output → PASS. Plan this into Phase 5.
 
 - **Preprocessed zkey sections (7-14) store coefs first, then 4×-extended evaluations.** Each Q_L/Q_R/Q_M/Q_O/Q_C/σ_1/σ_2/σ_3 section layout (confirmed against `snarkjs/src/fflonk_setup.js` `writeQMap`/`writeSigma`) is: `domain_size` Fr elements of the coefficient form, followed by `4*domain_size` Fr elements of the extended-domain Lagrange evaluations. For multiplier (domain_size=8) → 8+32 = 40 Fr per section = 1280 bytes. To evaluate the selector at xi via Horner, slice the first `domain_size` entries and ignore the rest.
+
+- **FFLONK setup needs a much larger PTau than Groth16 setup does.** Discovered 2026-04-18 during Phase 8 kysigned setup: for an N-constraint circuit, FFLONK's `snarkjs fflonk setup` requires the PTau's Section 2 (G1 series) to hold `(9 · domain_size + 18) · 64` bytes. For ~4.7M constraints → `domain_size = 2^23` → ~4.83 GB of G1 points needed. The Hermez `_final_K.ptau` Section 2 holds `(2^(K+1) − 1) · 64` bytes, so:
+  - `_final_23.ptau` (9.7 GB total) — Section 2 ≈ 1 GB — **too small** (fails with "Powers of Tau is not big enough for this circuit size. Section 2 too small.")
+  - `_final_25.ptau` — Section 2 ≈ 4.3 GB — just barely too small
+  - `_final_26.ptau` (77 GB total) — Section 2 ≈ 8.6 GB — **fits** ✓
+  - `_final_28.ptau` — Section 2 ≈ 34.4 GB — fits with large margin
+  Contrast: a Groth16 setup for 4.7M constraints only needs the _same_ cirPower-based PTau, because Groth16's verifier SRS ≈ `domain_size` points (not `9 × domain_size`). The 9× factor is specific to FFLONK's multi-polynomial fan-in commitment scheme.
+  **Action:** update `docs/dev-setup.md` + `tests/fixtures/kysigned/README.md` to specify `_final_26.ptau` (or higher) for large-circuit fixtures; keep `_final_23.ptau` for the small multiplier/poseidon tests.
 
 - **snarkjs zeroes witness[0] at prove start.** Circom-generated witnesses place the "constant 1" at index 0 so that referencing signal 0 in downstream circuits yields 1. In fflonk proving, however, snarkjs explicitly overwrites `witness[0] = 0` (see `fflonk_prove.js` ~line 110: "First element in plonk is not used and can be any value. (But always the same). We set it to zero to go faster in the exponentiations."). This is load-bearing for correctness: the setup's buildSigma treats signal 0 as "unused" and wires **all padding rows** (rows `n_constraints..n-2` across all three columns) into one long σ-cycle that starts at whichever real-constraint cell first references signal 0. For the permutation grand product to close, every cell in that cycle must hold the same value — zero, since padding cells are also zero. Proving with raw `witness[0] = 1` produces `Z[0] ≠ 1` and the prover halts. Our `round1` takes a local clone and zeroes `w[0]` before any wire-buffer construction.
 

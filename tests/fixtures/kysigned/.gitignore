@@ -1,0 +1,5 @@
+# Generated circuit.zkey is multi-GB — stored in S3 per README.
+circuit.zkey
+circuit.wasm
+kysigned-approval.r1cs
+from-ec2/
