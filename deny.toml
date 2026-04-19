@@ -34,7 +34,14 @@ highlight = "all"
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+    # `paste` (0.3.4) — "unmaintained" notice. Pulled in transitively by
+    # the arkworks family (ark-std → ark-bn254 → ark-ec etc). No known
+    # vulnerability; `paste` is a compile-time token-manipulation helper
+    # with no runtime security surface. We track the upstream arkworks
+    # migration off `paste` — when they bump, our warning clears.
+    "RUSTSEC-2024-0436",
+]
 
 [sources]
 unknown-registry = "deny"
